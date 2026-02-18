@@ -210,6 +210,16 @@ input string         IntradaySession4StartTime   = "18:00";
 input string         IntradaySession4EndTime     = "00:00";
 input color_scheme   IntradaySession4ColorScheme = Yellow_to_Cyan;
 
+input group "MinMax Lines"
+input string ____MinMax_Lines = "================";
+input bool             ShowMinMaxLines      = false;           // ShowMinMaxLines: Show independent min/max horizontal lines.
+input int              MinMaxBarsToScan     = 20;              // MinMaxBarsToScan: Number of bars (X) to scan for min/max.
+input int              MinMaxBarsOffset     = 0;               // MinMaxBarsOffset: Bars to skip from current bar (Y).
+input color            MaxLineColor         = clrRed;          // MaxLineColor: Color of the max line.
+input color            MinLineColor         = clrLime;         // MinLineColor: Color of the min line.
+input ENUM_LINE_STYLE  MinMaxLineStyle      = STYLE_SOLID;     // MinMaxLineStyle
+input int              MinMaxLineWidth      = 2;               // MinMaxLineWidth
+
 input group "Miscellaneous"
 input string ____Miscellaneous = "================";
 input sat_sun_solution SaturdaySunday                 = Saturday_Sunday_Normal_Days;
@@ -1081,6 +1091,61 @@ datetime PutDot(const double price, const int start_bar, const int range, const 
 }
 
 //+------------------------------------------------------------------+
+//| Draws independent min/max horizontal lines over the last X bars  |
+//| starting Y bars from the current bar.                            |
+//+------------------------------------------------------------------+
+void DrawMinMaxLines()
+{
+    if (!ShowMinMaxLines) return;
+    if (MinMaxBarsToScan <= 0) return;
+
+    int start_bar = MinMaxBarsOffset;                           // Nearest bar in the range.
+    int end_bar = MinMaxBarsOffset + MinMaxBarsToScan - 1;      // Farthest bar in the range.
+    if (start_bar >= Bars) return;
+    if (end_bar >= Bars) end_bar = Bars - 1;
+
+    int count = end_bar - start_bar + 1;
+
+    int max_idx = iHighest(Symbol(), Period(), MODE_HIGH, count, start_bar);
+    int min_idx = iLowest(Symbol(), Period(), MODE_LOW, count, start_bar);
+
+    double max_price = High[max_idx];
+    double min_price = Low[min_idx];
+
+    datetime time_left  = Time[end_bar];    // Oldest bar (left side of chart).
+    datetime time_right = Time[start_bar];  // Newest bar (right side of chart).
+
+    string name_high = "MinMaxHigh" + Suffix;
+    string name_low  = "MinMaxLow" + Suffix;
+
+    // Delete old lines before redrawing.
+    ObjectDelete(0, name_high);
+    ObjectDelete(0, name_low);
+
+    // Max line.
+    ObjectCreate(0, name_high, OBJ_TREND, 0, time_left, max_price, time_right, max_price);
+    ObjectSetInteger(0, name_high, OBJPROP_COLOR, MaxLineColor);
+    ObjectSetInteger(0, name_high, OBJPROP_STYLE, MinMaxLineStyle);
+    ObjectSetInteger(0, name_high, OBJPROP_WIDTH, MinMaxLineWidth);
+    ObjectSetInteger(0, name_high, OBJPROP_RAY_RIGHT, false);
+    ObjectSetInteger(0, name_high, OBJPROP_RAY_LEFT, false);
+    ObjectSetInteger(0, name_high, OBJPROP_BACK, true);
+    ObjectSetInteger(0, name_high, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, name_high, OBJPROP_HIDDEN, true);
+
+    // Min line.
+    ObjectCreate(0, name_low, OBJ_TREND, 0, time_left, min_price, time_right, min_price);
+    ObjectSetInteger(0, name_low, OBJPROP_COLOR, MinLineColor);
+    ObjectSetInteger(0, name_low, OBJPROP_STYLE, MinMaxLineStyle);
+    ObjectSetInteger(0, name_low, OBJPROP_WIDTH, MinMaxLineWidth);
+    ObjectSetInteger(0, name_low, OBJPROP_RAY_RIGHT, false);
+    ObjectSetInteger(0, name_low, OBJPROP_RAY_LEFT, false);
+    ObjectSetInteger(0, name_low, OBJPROP_BACK, true);
+    ObjectSetInteger(0, name_low, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, name_low, OBJPROP_HIDDEN, true);
+}
+
+//+------------------------------------------------------------------+
 //| Deletes all chart objects created by the indicator.              |
 //+------------------------------------------------------------------+
 void ObjectCleanup(string rectangle_prefix = "")
@@ -1128,6 +1193,11 @@ void ObjectCleanup(string rectangle_prefix = "")
     {
         ObjectsDeleteAll(0, rectangle_prefix + "TPOCA" + Suffix, 0, OBJ_TEXT);
         ObjectsDeleteAll(0, rectangle_prefix + "TPOCB" + Suffix, 0, OBJ_TEXT);
+    }
+    if (ShowMinMaxLines)
+    {
+        ObjectsDeleteAll(0, rectangle_prefix + "MinMaxHigh" + Suffix, 0, OBJ_TREND);
+        ObjectsDeleteAll(0, rectangle_prefix + "MinMaxLow" + Suffix, 0, OBJ_TREND);
     }
 }
 
@@ -3723,6 +3793,7 @@ int OnCalculateMain(const int rates_total, const int prev_calculated)
     if (_Session == Rectangle) // Everything becomes very simple if rectangle sessions are used.
     {
         CheckRectangles();
+        DrawMinMaxLines();
         Timer = (int)TimeLocal();
         return rates_total;
     }
@@ -3742,6 +3813,8 @@ int OnCalculateMain(const int rates_total, const int prev_calculated)
         Max_number_of_bars_in_a_session = n_bars;
 
         if (!ProcessSession(sessionstart, sessionend, 0)) return 0;
+
+        DrawMinMaxLines();
 
         if ((ShowValueAreaRays != None) || (ShowMedianRays != None) || ((HideRaysFromInvisibleSessions) && (SinglePrintRays))) CheckRays();
 
@@ -3833,12 +3906,14 @@ int OnCalculateMain(const int rates_total, const int prev_calculated)
         }
     }
 
+    DrawMinMaxLines();
+
     if ((ShowValueAreaRays != None) || (ShowMedianRays != None) || ((HideRaysFromInvisibleSessions) && (SinglePrintRays))) CheckRays();
 
     FirstRunDone = true;
 
     Timer = (int)TimeLocal();
-    
+
     return rates_total;
 }
 //+------------------------------------------------------------------+
