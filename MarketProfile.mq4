@@ -51,7 +51,8 @@ enum session_period
     Semiannual,
     Annual,
     Intraday,
-    Rectangle
+    Rectangle,
+    Last_N_Minutes
 };
 
 enum sat_sun_solution
@@ -113,6 +114,7 @@ input session_period Session                 = Daily;
 input datetime       StartFromDate           = __DATE__;        // StartFromDate: lower priority.
 input bool           StartFromCurrentSession = true;            // StartFromCurrentSession: higher priority.
 input int            SessionsToCount         = 2;               // SessionsToCount: Number of sessions to count Market Profile.
+input int            LastNMinutes            = 15;              // LastNMinutes: Duration in minutes for Last_N_Minutes session.
 input bool           SeamlessScrollingMode   = false;           // SeamlessScrollingMode: Show sessions on current screen.
 input bool           EnableDevelopingPOC     = false;           // Enable Developing POC
 input bool           EnableDevelopingVAHVAL  = false;           // Enable Developing VAH/VAL
@@ -3192,6 +3194,14 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
             Initialize();
             OnCalculateMain(Bars(Symbol(), Period()), 0);
         }
+        else if ((TerminalInfoInteger(TERMINAL_KEYSTATE_CONTROL) < 0) && (lparam == 57) && (_Session != Last_N_Minutes)) // Ctrl+9
+        {
+            Print("Switching session to Last_N_Minutes (" + IntegerToString(LastNMinutes) + " min)");
+            Deinitialize();
+            _Session = Last_N_Minutes;
+            Initialize();
+            OnCalculateMain(Bars(Symbol(), Period()), 0);
+        }
     }
 }
 
@@ -3591,6 +3601,26 @@ int Initialize()
         else Print("Initialization failed: " + alert_text);
         InitFailed = true; // Soft INIT_FAILED.
     }
+    else if (_Session == Last_N_Minutes)
+    {
+        Suffix = "_LN";
+        int period_minutes = PeriodSeconds() / 60;
+        if (period_minutes >= LastNMinutes)
+        {
+            string alert_text = "Timeframe (" + IntegerToString(period_minutes) + "min) must be smaller than LastNMinutes (" + IntegerToString(LastNMinutes) + ").";
+            if (!DisableAlertsOnWrongTimeframes) Alert(alert_text);
+            else Print("Initialization failed: " + alert_text);
+            InitFailed = true; // Soft INIT_FAILED.
+        }
+        if (LastNMinutes <= 0)
+        {
+            string alert_text = "LastNMinutes must be greater than 0.";
+            if (!DisableAlertsOnWrongTimeframes) Alert(alert_text);
+            else Print("Initialization failed: " + alert_text);
+            InitFailed = true; // Soft INIT_FAILED.
+        }
+        _SessionsToCount = 1; // Only one rolling session.
+    }
     // Indicator Name.
     IndicatorShortName("MarketProfile " + EnumToString(_Session));
 
@@ -3693,6 +3723,29 @@ int OnCalculateMain(const int rates_total, const int prev_calculated)
     if (_Session == Rectangle) // Everything becomes very simple if rectangle sessions are used.
     {
         CheckRectangles();
+        Timer = (int)TimeLocal();
+        return rates_total;
+    }
+
+    // Calculate Last_N_Minutes: rolling window of the last N minutes.
+    if (_Session == Last_N_Minutes)
+    {
+        // Always redraw - this is a rolling window.
+        ObjectCleanup();
+        FirstRunDone = false;
+
+        int n_bars = LastNMinutes / (PeriodSeconds() / 60);
+        if (n_bars < 1) n_bars = 1;
+        int sessionstart = MathMin(n_bars - 1, Bars - 1); // Oldest bar in the window.
+        int sessionend = 0;                                // Newest bar (current).
+
+        Max_number_of_bars_in_a_session = n_bars;
+
+        if (!ProcessSession(sessionstart, sessionend, 0)) return 0;
+
+        if ((ShowValueAreaRays != None) || (ShowMedianRays != None) || ((HideRaysFromInvisibleSessions) && (SinglePrintRays))) CheckRays();
+
+        FirstRunDone = true;
         Timer = (int)TimeLocal();
         return rates_total;
     }
